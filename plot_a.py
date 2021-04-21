@@ -1,0 +1,211 @@
+import numpy as np
+import torch
+import torchvision
+import matplotlib.pyplot as plt
+from time import time
+from torchvision import datasets, transforms
+from torch.autograd import Variable
+from torch import nn, optim
+from tqdm import tqdm
+import pickle
+import pdb
+from utils import *
+
+
+class scramble(object):
+
+    def __init__(self):
+        self.seed = np.random.randint(10 ** 8)
+
+    def __call__(self, pic):
+        """
+        Args:
+            pic (PIL Image or numpy.ndarray): Image to be converted to tensor.
+        Returns:
+            np.array: Image scrambled and converted to numpy array.
+        """
+        np.random.seed(self.seed)
+        pic = np.array(pic).flatten()
+        np.random.shuffle(pic)
+        pic = (pic.reshape(28, 28) / 255).astype(float)
+        return pic
+
+    def __repr__(self):
+        return self.__class__.__name__ + '()'
+
+
+class Net(nn.Module):
+
+    def __init__(self):
+        super(Net, self).__init__()
+        self.model = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(784, 400),
+            nn.ReLU(),
+            nn.Linear(400, 400),
+            nn.ReLU(),
+            nn.Linear(400, 10)
+        )
+
+    def forward(self, x):
+        return self.model(x.float())
+
+
+def get_fisher(net, tset):
+    tset = torch.utils.data.DataLoader(
+            tset,
+            batch_size=1,
+            num_workers=2,
+            drop_last=False,
+            shuffle=True)
+    net.eval()
+    lf = nn.CrossEntropyLoss()
+    sums = [torch.zeros(tuple(param.shape)).to('cuda:0') for param in net.parameters()]
+    for pic, lab in tqdm(tset, desc="Calculating fisher matrix"):
+        out = net(pic.cuda())
+        loss = lf(out, lab.cuda())
+        net.zero_grad()
+        loss.backward()
+
+        for i, param in enumerate(net.parameters()):
+            sums[i] += param.grad.detach() ** 2
+    net.train()
+    return sums
+
+
+class EWC(nn.Module):
+
+    def __init__(self, fishers, pnets, lam):
+        super(EWC, self).__init__()
+        self.fishers = fishers
+        self.pnets = pnets
+        self.lam = lam
+        self.lf = nn.CrossEntropyLoss()
+
+    def forward(self, outputs, labels, net):
+        reg = Variable(torch.tensor([0.]), requires_grad=True).to('cuda:0')
+        for fis, pnet in zip(self.fishers, self.pnets):
+            for cf, p1, p2 in zip(fis, net.parameters(), pnet.parameters()):
+                reg = reg + (cf * (p1 - p2)).norm(2)
+        return self.lf(outputs, labels) + self.lam * reg
+
+
+class L2(nn.Module):
+
+    def __init__(self, pnets, lam):
+        super(L2, self).__init__()
+        self.pnets = pnets
+        self.lam = lam
+        self.lf = nn.CrossEntropyLoss()
+
+    def forward(self, outputs, labels, net):
+        reg = Variable(torch.tensor([0.]), requires_grad=True).to('cuda:0')
+        for pnet in self.pnets:
+            for p1, p2 in zip(net.parameters(), pnet.parameters()):
+                reg = reg + ((p1 - p2)).norm(2)
+                
+        return self.lf(outputs, labels) + self.lam * reg
+
+
+def train(perts, lf):
+    net = Net()
+    net.cuda()
+    pnets = []
+    fishers = []
+    train_loaders = []
+    test_loaders = []
+    test_accs = []
+    for i, pert in enumerate(perts):
+        print("Starting task {}".format(i+1))
+        cur_trset = datasets.MNIST('./files', train=True, transform=transforms.Compose([
+            pert,
+            transforms.ToTensor()
+        ]))
+        cur_tset = testset1 = datasets.MNIST('./files', train=False, transform=transforms.Compose([
+            pert,
+            transforms.ToTensor()
+        ]))
+        train_loaders.append(torch.utils.data.DataLoader(
+            cur_trset,
+            batch_size=1,
+            num_workers=2,
+            drop_last=False,
+            shuffle=True))
+
+        test_loaders.append(torch.utils.data.DataLoader(
+            cur_tset,
+            batch_size=50,
+            num_workers=2,
+            drop_last=False))
+        test_accs.append([])
+        if lf == 'EWC':
+            criterion = EWC(fishers, pnets, 0.01)
+        elif lf == 'L2':
+            criterion = L2(pnets, 0.5)
+        else:
+            criterion = nn.CrossEntropyLoss()
+
+        optimizer = torch.optim.SGD(net.parameters(), lr=10 ** -3)
+        for epoch in range(20):  # loop over the dataset multiple times
+            print("Starting epoch {}".format(epoch))
+
+            for batch_n, data in enumerate(train_loaders[-1]):
+                # get the inputs; data is a list of [inputs, labels]
+                rl = 0.0
+                inputs, labels = data
+                inputs = inputs.cuda()
+                labels = labels.cuda()
+
+                optimizer.zero_grad()
+
+                outputs = net(inputs)
+                if lf in ['EWC', 'L2']:
+                    loss = criterion(outputs, labels, net)
+                else:
+                    loss = criterion(outputs, labels)
+                rl += loss.item()
+                loss.backward()
+                optimizer.step()
+                if batch_n % 1000 == 999:
+                    print("Loss: {}".format(round(rl / 1000, 6)))
+             
+                if batch_n % 10000 == 9999:    # print every 2000 mini-batches
+                    net.eval()
+                    for j, test_loader in enumerate(test_loaders):
+                        tot = 0
+                        correct = 0
+                        with torch.no_grad():
+                            for item in test_loader:
+                                ims = item[0].cuda()
+                                labs = item[1].cuda()
+                                preds = net(ims)
+                                preds = torch.sigmoid(preds).cpu().detach().numpy()
+                                right = preds.argmax(
+                                    axis=1) == labs.cpu().detach().numpy()
+                                tot += len(right)
+                                correct += sum(right)
+                        test_accs[j].append(correct / tot)
+                        print("Curr test acc for task {}: {}".format(j+1, correct / tot))
+                    net.train()
+        if lf == 'EWC':
+            fishers.append(get_fisher(net, cur_trset))
+            copy_net = Net()
+            copy_net.load_state_dict(net.state_dict())
+            pnets.append(copy_net.cuda())
+
+        elif lf == 'L2':
+            copy_net = Net()
+            copy_net.load_state_dict(net.state_dict())
+            pnets.append(copy_net.cuda())
+
+    with open('{}_a.pickle'.format(lf), 'wb') as f:
+        pickle.dump(test_accs, f)
+
+
+
+perts = [Scramble() for i in range(3)]
+
+for lf in ['L2']:
+    print("---- Starting {} ----".format(lf))
+    train(perts, lf)
+

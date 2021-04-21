@@ -12,28 +12,6 @@ import pdb
 from utils import *
 
 
-class scramble(object):
-
-    def __init__(self):
-        self.seed = np.random.randint(10 ** 8)
-
-    def __call__(self, pic):
-        """
-        Args:
-            pic (PIL Image or numpy.ndarray): Image to be converted to tensor.
-        Returns:
-            np.array: Image scrambled and converted to numpy array.
-        """
-        np.random.seed(self.seed)
-        pic = np.array(pic).flatten()
-        np.random.shuffle(pic)
-        pic = (pic.reshape(28, 28) / 255).astype(float)
-        return pic
-
-    def __repr__(self):
-        return self.__class__.__name__ + '()'
-
-
 class Net(nn.Module):
 
     def __init__(self):
@@ -49,28 +27,6 @@ class Net(nn.Module):
 
     def forward(self, x):
         return self.model(x.float())
-
-
-def get_fisher(net, tset):
-    tset = torch.utils.data.DataLoader(
-            tset,
-            batch_size=1,
-            num_workers=2,
-            drop_last=False,
-            shuffle=True)
-    net.eval()
-    lf = nn.CrossEntropyLoss()
-    sums = [torch.zeros(tuple(param.shape)).to('cuda:0') for param in net.parameters()]
-    for pic, lab in tqdm(tset, desc="Calculating fisher matrix"):
-        out = net(pic.cuda())
-        loss = lf(out, lab.cuda())
-        net.zero_grad()
-        loss.backward()
-
-        for i, param in enumerate(net.parameters()):
-            sums[i] += param.grad.detach() ** 2
-    net.train()
-    return sums
 
 
 class EWC(nn.Module):
@@ -169,7 +125,7 @@ def train(perts, lf):
                 if batch_n % 1000 == 999:
                     print("Loss: {}".format(round(rl / 1000, 6)))
              
-                if batch_n % 10000 == 9999:    # print every 2000 mini-batches
+                if batch_n % 10000 == 9999:
                     net.eval()
                     for j, test_loader in enumerate(test_loaders):
                         tot = 0

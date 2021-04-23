@@ -56,7 +56,7 @@
 \maketitle
 
 \begin{abstract}
-	Catastrophic forgetting refers to the tendency of Neural Networks to "forget" previously learned information when they are trained on new information. In "Overcoming catastrophic forgetting in neural networks", the authors propose Elastic Weight Consolidation as a method for mitigating catastrophic forgetting. In this work, we attempt to replicate the results of the MNIST experiments in the aforementioned paper, specifically plots 2 A-C. We succeed in replicating plots 2A and 2C, but are not able to completely replicate the results of plot 2B.
+	Catastrophic forgetting refers to the tendency of Neural Networks to "forget" previously learned information when they are trained on new information. In "Overcoming Catastrophic Forgetting in Neural Networks", the authors propose Elastic Weight Consolidation as a method for mitigating catastrophic forgetting. In this work, we attempt to replicate the results of the MNIST experiments in the aforementioned paper, specifically plots 2 A-C. We succeed in replicating plots 2A and 2C, but are not able to completely replicate the results of plot 2B. Thus, we are able to show the efficacy of Elastic Weight Consolidation as a method for mitigating catastrophic forgetting.
 \end{abstract}
 
 \section{Introduction}
@@ -84,20 +84,26 @@ The main goal of this work was to reproduce the above figure.
 
 \section{Implementation}
 
-In order to replicate the figure in the original paper, EWC, L2 regularization by previous weights, random scrambling, calculation of the fisher diagonal, and training code had to be implemented. The full code can be found \href{http://www.overleaf.com}{here}. Below I will describe the general implementation approach.
+In order to replicate the figure in the original paper, EWC, L2 regularization by previous weights, random scrambling, calculation of the fisher diagonal, and training code had to be implemented. The full code can be found \href{https://github.com/spohngellert-o/Pytorch-EWC-Replication}{here}. Below we will describe the general implementation approach.
 
 
 \subsection{EWC and L2}
 
-The fisher diagonal was calculated using the empirical fisher method, whose formula can be found in "Limitations of the Empirical Fisher Approximation for Natural Gradient Descent" \cite{empirical}. Once the fisher diagonal was calculated on the training set, this was passed to a class called "EWC", along with a replica of the model after training on the task. These together were used to calculate the regularization term in EWC using PyTorch operations in order to allow for differentiation. L2 had a similar implementation but only used the previous nets and no fisher matrix. The only difference I had from the original paper was using the norm of the regularization sum (adding a square root term), as I found this allowed for a greater range of lambda values to be used. The implementation of these classes, along with the scrambling code can be found \href{http://example.com}{here}.
+The fisher diagonal was calculated using the empirical fisher method, whose formula can be found in "Limitations of the Empirical Fisher Approximation for Natural Gradient Descent" \cite{empirical}. Once the fisher diagonal was calculated on the training set, this was passed to a class called "EWC", along with a replica of the model after training on the task. These together were used to calculate the regularization term in EWC using PyTorch operations in order to allow for differentiation. L2 had a similar implementation but only used the previous nets and no fisher matrix. The only difference we had from the original paper was using the norm of the regularization sum (adding a square root term), as we found this allowed for a greater range of lambda values to be used:
+
+$$
+L(\theta) = L_{B}(\theta) + \frac{\lambda}{2} \sqrt{\sum_{i}F_{i}(\theta_{i} - \theta^{*}_{A,i})^2}
+$$
+
+The implementation of these classes, along with the scrambling code can be found \href{https://github.com/spohngellert-o/Pytorch-EWC-Replication/blob/main/utils.py}{here}.
 
 \subsection{Training Code}
 
-For each plot I implemented separate training loops, as different information needed to be saved for each, and they each used different network architectures. The majority of the hyperparameters used in the original paper were detailed, which allowed for a relatively painless implementation. However, the batch size and $\lambda$ hyperparameters were not listed. For batch size, I assumed a batch size of 1, and used this when possible, but for plots B and C batch size was increased to save computation time. $\lambda$ was set to 0.01 for plots A and C, and 0.01 or 0.005 for plot B. Further, the hyperparameters for plot B included a range of values, and the authors said they used a search for the optimal values. To save time, I used the middle value (1200) for hidden layer size, and the max value ($10^{-3}$) for learning rate. The implementations of training loops for each plot can be found at the following locations: \href{}{Plot A}, \href{}{Plot B}, \href{}{Plot C}. 
+For each plot we implemented separate training loops, as different information needed to be saved for each, and they each used different network architectures. The majority of the hyperparameters used in the original paper were detailed, which allowed for a relatively painless implementation. However, the batch size and $\lambda$ hyperparameters were not listed. For batch size, we assumed a batch size of 1, and used this when possible, but for plots B and C batch size was increased to save computation time. $\lambda$ was set to 0.01 for plots A and C, and 0.01 or 0.005 for plot B. Further, the hyperparameters for plot B included a range of values, and the authors said they used a search for the optimal values. To save time, we used the middle value (1200) for hidden layer size, and the max value ($10^{-3}$) for learning rate. The implementations of training loops for each plot can be found at the following locations: \href{https://github.com/spohngellert-o/Pytorch-EWC-Replication/blob/main/plot_a.py}{Plot A}, \href{https://github.com/spohngellert-o/Pytorch-EWC-Replication/blob/main/plot_b.py}{Plot B}, \href{https://github.com/spohngellert-o/Pytorch-EWC-Replication/blob/main/plot_c.py}{Plot C}. 
 
 \subsection{Plotting}
 
-Once the data was saved, re-loaded and plotted. For plot C, the metric for overlap in fisher was "Fr\' echet Distance". The formula for this can be found in section 4.3 of the original paper, and this formula was used. The implementation of these plots can be found \href{}{here}.
+Once the data was saved, re-loaded and plotted. For plot C, the metric for overlap in fisher was "Fr\' echet Distance". The formula for this can be found in section 4.3 of the original paper, and this formula was used. The implementation of these plots can be found \href{https://github.com/spohngellert-o/Pytorch-EWC-Replication/blob/main/MakePlots.ipynb}{here}.
 
 \section{Results}
 
@@ -141,10 +147,15 @@ However, as we can see in \ref{fig:repb}, EWC seems to achieve siilar performanc
 As can be seen in Figure \ref{fig:repb2}, using the lower value for $\lambda$ did allow EWC to achieve better performance than Dropout, but only to a small degree. Though this does not fully replicate the plot referenced in the original text, it does display the importance of tuning $\lambda$. Here we can see that tuning this hyperparameter can greatley impact performance. 
 
 
+\section{Discussion}
+
+Based on these results, it appears that EWC is a valid method for preventing catastrophic forgetting. More work would have to be done to determine how effective it is compared to other methods. Further, one important area of exploration would be speed comparisons. The code written for this project was not fully optimized for speed, and thus it is likely improvements could be made in this area.
+
 
 
 \bibliographystyle{unsrt}
-\bibliography{neurips_2019}
+\bibliography{bibliography}
+
 
 
 \end{document}

@@ -29,40 +29,6 @@ class Net(nn.Module):
         return self.model(x.float())
 
 
-class EWC(nn.Module):
-
-    def __init__(self, fishers, pnets, lam):
-        super(EWC, self).__init__()
-        self.fishers = fishers
-        self.pnets = pnets
-        self.lam = lam
-        self.lf = nn.CrossEntropyLoss()
-
-    def forward(self, outputs, labels, net):
-        reg = Variable(torch.tensor([0.]), requires_grad=True).to('cuda:0')
-        for fis, pnet in zip(self.fishers, self.pnets):
-            for cf, p1, p2 in zip(fis, net.parameters(), pnet.parameters()):
-                reg = reg + (cf * (p1 - p2)).norm(2)
-        return self.lf(outputs, labels) + self.lam * reg
-
-
-class L2(nn.Module):
-
-    def __init__(self, pnets, lam):
-        super(L2, self).__init__()
-        self.pnets = pnets
-        self.lam = lam
-        self.lf = nn.CrossEntropyLoss()
-
-    def forward(self, outputs, labels, net):
-        reg = Variable(torch.tensor([0.]), requires_grad=True).to('cuda:0')
-        for pnet in self.pnets:
-            for p1, p2 in zip(net.parameters(), pnet.parameters()):
-                reg = reg + ((p1 - p2)).norm(2)
-                
-        return self.lf(outputs, labels) + self.lam * reg
-
-
 def train(perts, lf):
     net = Net()
     net.cuda()
